@@ -66,7 +66,7 @@ static void idle (void *aux UNUSED);
 static struct thread *running_thread (void);
 static struct thread *next_thread_to_run (void);
 
-static void init_thread (struct thread *, const char *name, int priority);
+static void init_thread(struct thread *,const char *name,int priority);
 
 static bool is_thread (struct thread *) UNUSED;
 static void *alloc_frame (struct thread *, size_t size);
@@ -88,7 +88,7 @@ static tid_t allocate_tid (void);
    It is not safe to call thread_current() until this function
    finishes. */
 void
-thread_init (void) 
+thread_init (void)
 {
   ASSERT (intr_get_level () == INTR_OFF);
 
@@ -99,7 +99,7 @@ thread_init (void)
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
 
-  init_thread (initial_thread, "main", PRI_DEFAULT);
+  init_thread(initial_thread,"main",PRI_DEFAULT);
 
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
@@ -108,15 +108,16 @@ thread_init (void)
 /* Starts preemptive thread scheduling by enabling interrupts.
    Also creates the idle thread. */
 void
-thread_start (void) 
+thread_start (void)
 {
   /* Create the idle thread. */
   struct semaphore idle_started;
 
   //init_info (initial_thread, initial_thread->tid);
-  
+
   sema_init (&idle_started, 0);
-  thread_create ("idle", PRI_MIN, idle, &idle_started);
+
+  thread_create("idle",PRI_MIN,idle,&idle_started);
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
@@ -171,8 +172,8 @@ thread_print_stats (void)
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
 tid_t
-thread_create (const char *name, int priority,
-               thread_func *function, void *aux) 
+thread_create(const char *name,int priority,thread_func *function,void *aux)
+
 {
   struct thread *t;
   struct kernel_thread_frame *kf;
@@ -188,7 +189,9 @@ thread_create (const char *name, int priority,
     return TID_ERROR;
 
   /* Initialize thread. */
-  init_thread (t, name, priority);
+
+  init_thread(t,name,priority);
+
   tid = t->tid = allocate_tid ();
 
   /* Stack frame for kernel_thread(). */
@@ -205,6 +208,12 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
+
+
+// Setting the thread for the parent
+#ifdef USERPROG
+  t->parentThread = thread_current();
+#endif
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -456,8 +465,7 @@ is_thread (struct thread *t)
 
 /* Does basic initialization of T as a blocked thread named
    NAME. */
-static void
-init_thread (struct thread *t, const char *name, int priority)
+static void init_thread(struct thread *t,const char *name,int priority)
 {
   enum intr_level old_level;
 
@@ -472,13 +480,18 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
-  //t->is_kernel = is_kernel;
+#ifdef USERPROG
+  t->exitcode = -1;
+  list_init (&t->childrenList);
+  t->parentThread = NULL;
+  list_init (&t->fileList);
+  t->executedFile = NULL;
+#endif
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
 }
-
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
    returns a pointer to the frame's base. */
@@ -589,7 +602,28 @@ allocate_tid (void)
 
   return tid;
 }
-
+
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+// detach pointer to the parent thread 
+#ifdef USERPROG 
+void detach_parent(tid_t tid){
+  struct list_elem *element;
+  struct thread *thread;
+
+  for (element = list_begin (&all_list); element != list_end (&all_list);
+    element = list_next (element))
+    {
+    thread = list_entry (element, struct thread, allelem);
+    if (is_thread (thread) && thread->tid == tid && thread->parentThread != NULL)
+    {
+      thread->parentThread = NULL;
+      return;
+    }
+  }
+}
+#endif
+
+

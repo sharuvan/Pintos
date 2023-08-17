@@ -23,6 +23,7 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+#define NAME_MAX_SIZE 16                /* Maximum name length*/
 
 /* A kernel thread or user process.
 
@@ -97,11 +98,19 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     int8_t *exitcode;                   /* Exit code */
+    struct thread *parentThread;        /* Parent thread */
+    struct list childrenList;           /* Child processes*/
+    struct list fileList;               /* Thread file list */
+    struct file *executedFile;          /* Executed file */
 #endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
+#ifdef USERPROG
+void detach_parent(tid_t tid);
+#endif
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -115,6 +124,7 @@ void thread_tick (void);
 void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
+
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 void thread_block (void);
@@ -140,3 +150,4 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 #endif /* threads/thread.h */
+
