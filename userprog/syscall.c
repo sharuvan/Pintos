@@ -33,6 +33,9 @@ static void syscall_handler(struct intr_frame *frame)
 
   switch (call)
   {
+  case SYS_HALT:
+      sys_halt();
+      break;
   case SYS_EXIT:
     sys_exit((int)load_stack(frame, POS0));
     break;
@@ -50,6 +53,15 @@ static void syscall_handler(struct intr_frame *frame)
     frame->eax = sys_write((int)load_stack(frame, POS0),
                            (const void *)load_stack(frame, POS1),
                            (unsigned int)load_stack(frame, POS2));
+    break;
+
+  case SYS_SEEK:
+    sys_seek ((int) load_stack (frame, POS0),
+      (unsigned) load_stack (frame, POS1));
+    break;
+  
+  case SYS_CLOSE:
+    sys_close ((int) load_stack (frame, POS0));
     break;
 
   default:
@@ -95,6 +107,11 @@ bool valid_string(const char *str)
     if (read_user((uint8_t *)(str + i)) == '\0')
       return true;
   }
+}
+
+// shutdown
+void sys_halt (void) {
+  shutdown_power_off ();
 }
 
 // terminate process with exitcode
@@ -159,4 +176,24 @@ int sys_write(int fd, const void *buffer, unsigned int length)
   sema_up(&sema);
 
   return return_val;
+}
+
+// seek file position
+void sys_seek (int fd, unsigned position) {
+  struct file_map *fileMap = get_file_map (fd);
+  if (fileMap == NULL) return;
+  sema_down (&sema);
+  file_seek (fileMap->file, position);
+  sema_up (&sema);
+}
+
+// close file
+void sys_close (int fd) {
+  struct file_map *fileMap = get_file_map (fd);
+  if (fileMap == NULL)  return;
+  sema_down (&sema);
+  file_close (fileMap->file);
+  sema_up (&sema);
+  list_remove (&fileMap->elem);
+  free (fileMap);
 }
