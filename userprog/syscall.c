@@ -33,55 +33,68 @@ static void syscall_handler(struct intr_frame *frame)
 
   switch (call)
   {
-  case SYS_HALT:
-      sys_halt();
-      break;
-  case SYS_EXIT:
-    sys_exit((int)load_stack(frame, POS0));
-    break;
+      case SYS_HALT:
+        sys_halt();
+        break;
 
-  case SYS_CREATE:
-    frame->eax = sys_create((const char *)load_stack(frame, POS0),
-                            (unsigned int)load_stack(frame, POS1));
-    break;
+      case SYS_EXIT:
+        sys_exit ((int) load_stack (frame, POS0));
+        break;
 
-  case SYS_REMOVE:
-    frame->eax = sys_remove((const char *)load_stack(frame, POS0));
-    break;
+      case SYS_EXEC:
+        frame->eax = sys_exec ((const char *) load_stack (frame, POS0));
+        break;
 
-  case SYS_WRITE:
-    frame->eax = sys_write((int)load_stack(frame, POS0),
-                           (const void *)load_stack(frame, POS1),
-                           (unsigned int)load_stack(frame, POS2));
-    break;
+      case SYS_WAIT:
+        frame->eax = sys_wait ((pid_t) load_stack (frame, POS0));
+        break;
 
-  case SYS_SEEK:
-    sys_seek ((int) load_stack (frame, POS0),
-      (unsigned) load_stack (frame, POS1));
-    break;
-  
-  case SYS_CLOSE:
-    sys_close ((int) load_stack (frame, POS0));
-    break;
+      case SYS_CREATE:
+        frame->eax = sys_create ((const char *) load_stack (frame, POS0),
+          (unsigned int) load_stack (frame, POS1));
+        break;
+
+      case SYS_REMOVE:
+        frame->eax = sys_remove ((const char *) load_stack (frame, POS0));
+        break;
+
+      case SYS_OPEN:
+        frame->eax = sys_open ((const char *) load_stack (frame, POS0));
+        break;
+
+      case SYS_FILESIZE:
+        frame->eax = sys_filesize ((int) load_stack (frame, POS0));
+        break;
+
+      case SYS_READ:
+        frame->eax = sys_read ((int) load_stack (frame, POS0),
+            (void *) load_stack (frame, POS1),
+            (unsigned int) load_stack (frame, POS2));
+        break;
+
+      case SYS_WRITE:
+        frame->eax = sys_write ((int) load_stack (frame, POS0),
+            (const void *) load_stack (frame, POS1),
+            (unsigned int) load_stack (frame, POS2));
+        break;
+
+      case SYS_SEEK:
+        sys_seek ((int) load_stack (frame, POS0),
+          (unsigned) load_stack (frame, POS1));
+        break;
+
+      case SYS_TELL:
+        frame->eax = sys_tell ((int) load_stack (frame, POS0));
+        break;
+
+      case SYS_CLOSE:
+        sys_close ((int) load_stack (frame, POS0));
+        break;
 
   default:
     sys_exit(EXIT_ERROR_CODE);
     break;
   }
-}
-
-// get file map from file descriptor
-struct file_map * get_file_map(int fd) {
-  struct thread *ct = thread_current ();
-  struct list_elem *element;
-  struct file_map *fileMap;
-
-  for (element = list_begin (&ct->fileList); element != list_end (&ct->fileList);
-  	element = list_next (element)) {
-    fileMap = list_entry (element, struct file_map, elem);
-    if (fileMap->fd == fd) return fileMap;
-  }
-  return NULL;
 }
 
 // get file map from file descriptor
@@ -99,6 +112,22 @@ struct file_map *get_file_map(int fd)
       return fileMap;
   }
   return NULL;
+}
+
+// close all files in thread
+void close_files (struct thread *t) {
+  struct list_elem *element;
+  struct file_map *fileMap;
+  element = list_begin (&t->fileList);
+  while (element != list_end (&t->fileList)){
+    fileMap = list_entry (element, struct file_map, elem);
+    element = list_next (element);
+    sema_down (&sema);
+    file_close (fileMap->file);
+    sema_up (&sema);
+    list_remove (&fileMap->elem);
+    free (fileMap);
+  }
 }
 
 // read a byte from user memory space
@@ -161,6 +190,12 @@ void sys_exit(int status)
   struct thread *ct = thread_current();
   ct->exitcode = status;
   thread_exit();
+}
+
+// execute command
+pid_t sys_exec (const char *command) {
+  if (!valid_string (command)) sys_exit (EXIT_ERROR_CODE);
+  return process_execute (command);
 }
 
 // wait for process to end
@@ -226,6 +261,25 @@ int sys_filesize(int fd) {
   return size;
 }
 
+// buffered file read
+int sys_read (int fd, void *buffer, unsigned length) {
+  size_t index = 0;
+  struct file_map *fileMap;
+  if (fd == STDIN_FILENO){ 
+    while (index++ < length)
+      if (!write_user (((uint8_t *) buffer + index),
+        (uint8_t) input_getc ())) sys_exit (EXIT_ERROR_CODE);
+    return index;
+  }
+  if (!valid_buffer (buffer, length)) sys_exit (EXIT_ERROR_CODE);
+  fileMap = get_file_map (fd);
+  if (fileMap == NULL) sys_exit (EXIT_ERROR_CODE);
+  sema_down (&sema);
+  int return_val = file_read (fileMap->file, buffer, length);
+  sema_up (&sema);
+  return return_val;
+}
+
 // buffered file write
 int sys_write(int fd, const void *buffer, unsigned int length)
 {
@@ -267,6 +321,16 @@ void sys_seek (int fd, unsigned position) {
   sema_down (&sema);
   file_seek (fileMap->file, position);
   sema_up (&sema);
+}
+
+// get the current position in file
+unsigned sys_tell (int fd) {
+  struct file_map *fileMap = get_file_map (fd);
+  if (fileMap == NULL) return 0;
+  sema_down (&sema);
+  unsigned int ret = file_tell (fileMap->file);
+  sema_up (&sema);
+  return ret;
 }
 
 // close file

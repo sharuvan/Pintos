@@ -33,7 +33,10 @@ void sys_close (int fd);
 int sys_wait (pid_t pid);
 int sys_open (const char *file);
 int sys_filesize (int fd);
+int sys_read (int fd, void *buffer, unsigned length);
 int sys_write(int fd, const void *buffer, unsigned int length);
+unsigned sys_tell (int fd);
+pid_t sys_exec (const char *cmd_line);
 struct file_map *get_file_map (int fd);
 
 #endif /* userprog/syscall.h */
