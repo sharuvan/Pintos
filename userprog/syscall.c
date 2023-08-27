@@ -71,6 +71,20 @@ static void syscall_handler(struct intr_frame *frame)
 }
 
 // get file map from file descriptor
+struct file_map * get_file_map(int fd) {
+  struct thread *ct = thread_current ();
+  struct list_elem *element;
+  struct file_map *fileMap;
+
+  for (element = list_begin (&ct->fileList); element != list_end (&ct->fileList);
+  	element = list_next (element)) {
+    fileMap = list_entry (element, struct file_map, elem);
+    if (fileMap->fd == fd) return fileMap;
+  }
+  return NULL;
+}
+
+// get file map from file descriptor
 struct file_map *get_file_map(int fd)
 {
   struct thread *ct = thread_current();
@@ -85,6 +99,33 @@ struct file_map *get_file_map(int fd)
       return fileMap;
   }
   return NULL;
+}
+
+// read a byte from user memory space
+static int read_user (const uint8_t *address) {
+  if ((uint32_t) address >= (uint32_t) PHYS_BASE) return -1;
+  int res;
+  asm ("movl $1f, %0; movzbl %1, %0; 1:" : "=&a" (res) : "m" (*address));
+  return res;
+}
+
+// write a byte to user memory space
+static bool write_user (uint8_t *address, uint8_t byte) {
+  if ((uint32_t) address < (uint32_t) PHYS_BASE) return false;
+  int error_code;
+  asm ("movl $1f, %0; movb %b2, %1; 1:" : "=&a" (error_code), "=m" (*address) : "q" (byte));
+  return error_code != -1;
+}
+
+// validate and dereference stack pointer
+static uint32_t load_stack (struct intr_frame *frame, int offset) {
+  if (!valid_usr_ptr (frame->esp + offset)) sys_exit (EXIT_ERROR_CODE);
+  return *((uint32_t *) (frame->esp + offset));
+}
+
+// check if valid user pointer
+bool valid_usr_ptr (void *vaddr) {
+  return read_user((uint8_t *)vaddr) != -1;
 }
 
 // check if valid buffer
@@ -122,6 +163,11 @@ void sys_exit(int status)
   thread_exit();
 }
 
+// wait for process to end
+int sys_wait (pid_t pid) {
+  return process_wait (pid);
+}
+
 // create file
 bool sys_create(const char *name, unsigned int initial_size)
 {
@@ -142,6 +188,42 @@ bool sys_remove(const char *file)
   bool success = filesys_remove(file);
   sema_up(&sema);
   return success;
+}
+
+// open file
+int sys_open (const char *file) {
+  if (!valid_string (file)) sys_exit (EXIT_ERROR_CODE);
+
+  int fd = MINIMUM_FD;
+  struct file_map *fileMap;
+  struct thread *ct = thread_current ();
+
+  while (fd >= MINIMUM_FD && get_file_map (fd) != NULL) fd++;
+  if (fd < MINIMUM_FD) sys_exit (EXIT_ERROR_CODE);
+  fileMap = malloc (sizeof (struct file_map));
+  if (fileMap == NULL) return -1;
+  fileMap->fd = fd;
+  sema_down (&sema);
+  fileMap->file = filesys_open (file);
+  sema_up (&sema);
+
+  if (fileMap->file == NULL){
+      free (fileMap);
+      return -1;
+  }
+  list_push_back (&ct->fileList, &fileMap->elem);
+
+  return fileMap->fd;
+}
+
+// fetch file size from descriptor
+int sys_filesize(int fd) {
+  struct file_map *fileMap = get_file_map(fd);
+  if (fileMap == NULL) return -1;
+  sema_down(&sema);
+  int size = file_length(fileMap->file);
+  sema_up(&sema);
+  return size;
 }
 
 // buffered file write
